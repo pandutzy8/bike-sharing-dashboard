@@ -1,3 +1,4 @@
+import os
 import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -10,12 +11,24 @@ st.set_page_config(
     layout="wide"
 )
 
-# Fungsi untuk memuat dan membersihkan data
+# Fungsi untuk memuat dan membersihkan data dengan penanganan path dinamis
 @st.cache_data
 def load_data():
-    day_df = pd.read_csv('day.csv')
-    hour_df = pd.read_csv('hour.csv')
+    # Ambil direktori absolut tempat dashboard.py disimpan
+    current_dir = os.path.dirname(os.path.abspath(__file__))
     
+    # Cek lokasi file di folder yang sama dengan dashboard.py
+    day_path = os.path.join(current_dir, 'day.csv')
+    hour_path = os.path.join(current_dir, 'hour.csv')
+    
+    # Jika tidak ada di folder yang sama, cek di subfolder 'data/'
+    if not os.path.exists(day_path):
+        day_path = os.path.join(current_dir, '..', 'data', 'day.csv')
+        hour_path = os.path.join(current_dir, '..', 'data', 'hour.csv')
+
+    day_df = pd.read_csv(day_path)
+    hour_df = pd.read_csv(hour_path)
+
     # Konversi tipe data tanggal
     day_df['dteday'] = pd.to_datetime(day_df['dteday'])
     hour_df['dteday'] = pd.to_datetime(hour_df['dteday'])
@@ -34,7 +47,6 @@ def load_data():
 
 # Memuat data
 day_df, hour_df = load_data()
-
 # ==========================================
 # SIDEBAR / FILTER DATA
 # ==========================================
