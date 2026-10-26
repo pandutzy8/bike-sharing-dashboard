@@ -11,17 +11,14 @@ st.set_page_config(
     layout="wide"
 )
 
-# Fungsi untuk memuat dan membersihkan data dengan penanganan path dinamis
+# 1. Fungsi Load Data dengan Clustering (Manual Grouping / Binning)
 @st.cache_data
 def load_data():
-    # Ambil direktori absolut tempat dashboard.py disimpan
     current_dir = os.path.dirname(os.path.abspath(__file__))
     
-    # Cek lokasi file di folder yang sama dengan dashboard.py
     day_path = os.path.join(current_dir, 'day.csv')
     hour_path = os.path.join(current_dir, 'hour.csv')
     
-    # Jika tidak ada di folder yang sama, cek di subfolder 'data/'
     if not os.path.exists(day_path):
         day_path = os.path.join(current_dir, '..', 'data', 'day.csv')
         hour_path = os.path.join(current_dir, '..', 'data', 'hour.csv')
@@ -29,11 +26,11 @@ def load_data():
     day_df = pd.read_csv(day_path)
     hour_df = pd.read_csv(hour_path)
 
-    # Konversi tipe data tanggal
+    # Konversi tanggal
     day_df['dteday'] = pd.to_datetime(day_df['dteday'])
     hour_df['dteday'] = pd.to_datetime(hour_df['dteday'])
     
-    # Mapping label cuaca
+    # Label Cuaca
     weather_map = {
         1: 'Clear/Few Clouds',
         2: 'Misty/Cloudy',
@@ -43,127 +40,106 @@ def load_data():
     day_df['weather_label'] = day_df['weathersit'].map(weather_map)
     hour_df['weather_label'] = hour_df['weathersit'].map(weather_map)
     
+    # --- PENERAPAN ANALISIS LANJUTAN (CLUSTERING / MANUAL GROUPING & BINNING) ---
+    # Binning Kategori Permintaan (Demand)
+    bins = [0, 2000, 5000, 10000]
+    labels = ['Low Demand', 'Medium Demand', 'High Demand']
+    day_df['demand_category'] = pd.cut(day_df['cnt'], bins=bins, labels=labels)
+
+    # Grouping Kategori Waktu Harian
+    def hour_group(hour):
+        if 0 <= hour < 6:
+            return 'Night'
+        elif 6 <= hour < 12:
+            return 'Morning'
+        elif 12 <= hour < 18:
+            return 'Afternoon'
+        else:
+            return 'Evening'
+
+    hour_df['time_of_day'] = hour_df['hr'].apply(hour_group)
+    
     return day_df, hour_df
 
-# Memuat data
+# Load dataset
 day_df, hour_df = load_data()
-# ==========================================
-# SIDEBAR / FILTER DATA
-# ==========================================
-st.sidebar.title("🚲 Filter Analisis")
 
-# Filter Tahun
-year_option = st.sidebar.selectbox(
+# 2. Sidebar Filter
+st.sidebar.header("Filter Data")
+year_filter = st.sidebar.multiselect(
     "Pilih Tahun:",
     options=[2011, 2012],
-    index=1
+    default=[2011, 2012]
 )
 
-# Filter Rentang Tanggal
-min_date = day_df['dteday'].min().date()
-max_date = day_df['dteday'].max().date()
+# Convert yr (0: 2011, 1: 2012)
+year_map = {2011: 0, 2012: 1}
+selected_years = [year_map[y] for y in year_filter]
+filtered_day_df = day_df[day_df['yr'].isin(selected_years)]
+filtered_hour_df = hour_df[hour_df['yr'].isin(selected_years)]
 
-start_date, end_date = st.sidebar.date_input(
-    "Pilih Rentang Tanggal:",
-    value=[min_date, max_date],
-    min_value=min_date,
-    max_value=max_date
-)
+# 3. Header Dashboard
+st.title("🚲 Bike Sharing Data Analysis Dashboard")
+st.markdown("---")
 
-# Filter Data berdasarkan Input Sidebar
-filtered_day_df = day_df[
-    (day_df['dteday'].dt.year == year_option) &
-    (day_df['dteday'].dt.date >= start_date) &
-    (day_df['dteday'].dt.date <= end_date)
-]
-
-filtered_hour_df = hour_df[
-    (hour_df['dteday'].dt.year == year_option) &
-    (hour_df['dteday'].dt.date >= start_date) &
-    (hour_df['dteday'].dt.date <= end_date)
-]
-
-# ==========================================
-# MAIN DASHBOARD
-# ==========================================
-st.title("🚲 Dashboard Analisis Penyewaan Sepeda")
-st.markdown(f"**Menampilkan Data Tahun {year_option}**")
-
-# Ringkasan Performa (Metric Cards)
-col1, col2, col3, col4 = st.columns(4)
+# 4. Ringkasan Metrik
+col1, col2, col3 = st.columns(3)
 with col1:
-    total_rentals = filtered_day_df['cnt'].sum()
-    st.metric("Total Penyewaan", f"{total_rentals:,}")
-
+    st.metric("Total Penyewaan", f"{filtered_day_df['cnt'].sum():,}")
 with col2:
-    avg_daily_rentals = int(filtered_day_df['cnt'].mean()) if not filtered_day_df.empty else 0
-    st.metric("Rata-rata Harian", f"{avg_daily_rentals:,}")
-
+    st.metric("Penyewaan Casual", f"{filtered_day_df['casual'].sum():,}")
 with col3:
-    registered_rentals = filtered_day_df['registered'].sum()
-    st.metric("Pengguna Terdaftar", f"{registered_rentals:,}")
+    st.metric("Penyewaan Registered", f"{filtered_day_df['registered'].sum():,}")
 
-with col4:
-    casual_rentals = filtered_day_df['casual'].sum()
-    st.metric("Pengguna Kasual", f"{casual_rentals:,}")
+st.markdown("---")
 
-st.divider()
+# =========================================================
+# BAGIAN 1: PERTANYAAN BISNIS UTAMA
+# =========================================================
+st.subheader("📊 Analisis Pertanyaan Utama")
 
-# ==========================================
-# VISUALISASI PERTANYAAN 1
-# ==========================================
-st.subheader("1. Pengaruh Cuaca Terhadap Rata-rata Penyewaan Sepeda Harian")
+col_biz1, col_biz2 = st.columns(2)
 
-if not filtered_day_df.empty:
-    fig1, ax1 = plt.subplots(figsize=(8, 4))
-    sns.barplot(
-        x='weather_label', 
-        y='cnt', 
-        data=filtered_day_df, 
-        estimator=lambda x: sum(x)/len(x) if len(x) > 0 else 0,
-        errorbar=None,
-        palette='Blues_d',
-        ax=ax1
-    )
-    ax1.set_xlabel("Kondisi Cuaca")
-    ax1.set_ylabel("Rata-rata Jumlah Penyewaan")
-    ax1.set_title(f"Rata-rata Penyewaan Harian berdasarkan Cuaca ({year_option})")
-    st.pyplot(fig1)
-else:
-    st.warning("Data tidak tersedia untuk rentang tanggal ini.")
+with col_biz1:
+    st.write("**1. Pengaruh Cuaca terhadap Total Penyewaan**")
+    fig, ax = plt.subplots(figsize=(6, 4))
+    sns.barplot(data=filtered_day_df, x='weather_label', y='cnt', palette='viridis', ax=ax)
+    ax.set_xlabel("Kondisi Cuaca")
+    ax.set_ylabel("Rata-rata Penyewaan")
+    st.pyplot(fig)
 
-st.divider()
+with col_biz2:
+    st.write("**2. Tren Penyewaan Sepeda berdasarkan Jam**")
+    fig, ax = plt.subplots(figsize=(6, 4))
+    sns.lineplot(data=filtered_hour_df, x='hr', y='cnt', hue='workingday', palette='Set1', ax=ax)
+    ax.set_xlabel("Jam (0-23)")
+    ax.set_ylabel("Jumlah Penyewaan")
+    st.pyplot(fig)
 
-# ==========================================
-# VISUALISASI PERTANYAAN 2
-# ==========================================
-st.subheader("2. Pola Penyewaan Sepeda per Jam: Hari Kerja vs Hari Libur")
+st.markdown("---")
 
-if not filtered_hour_df.empty:
-    fig2, ax2 = plt.subplots(figsize=(10, 4.5))
-    sns.lineplot(
-        data=filtered_hour_df, 
-        x='hr', 
-        y='cnt', 
-        hue='workingday', 
-        palette={0: 'orange', 1: 'blue'}, 
-        marker='o',
-        ax=ax2
-    )
-    ax2.set_xlabel("Jam (00:00 - 23:00)")
-    ax2.set_ylabel("Rata-rata Jumlah Penyewaan")
-    ax2.set_xticks(range(0, 24))
-    ax2.set_title("Pola Jam Penyewaan Sepeda per Jam")
+# =========================================================
+# BAGIAN 2: ANALISIS LANJUTAN (CLUSTERING / BINNING)
+# =========================================================
+st.subheader("📌 Analisis Lanjutan: Pengelompokan Data (Clustering / Binning)")
+
+col_adv1, col_adv2 = st.columns(2)
+
+with col_adv1:
+    st.write("**1. Distribusi Kategori Permintaan (Demand Category)**")
+    fig, ax = plt.subplots(figsize=(6, 4))
+    sns.countplot(data=filtered_day_df, x='demand_category', palette='Blues', ax=ax)
+    ax.set_xlabel("Kategori Demand")
+    ax.set_ylabel("Jumlah Hari")
+    st.pyplot(fig)
+
+with col_adv2:
+    st.write("**2. Rata-rata Penyewaan berdasarkan Kategori Waktu Harian**")
+    time_order = ['Morning', 'Afternoon', 'Evening', 'Night']
+    time_avg = filtered_hour_df.groupby('time_of_day')['cnt'].mean().reindex(time_order).reset_index()
     
-    # Penyesuaian Legenda
-    ax2.legend(
-        title='Tipe Hari', 
-        labels=['Hari Libur / Weekend', 'Hari Kerja']
-    )
-    ax2.grid(True, linestyle='--', alpha=0.5)
-    st.pyplot(fig2)
-else:
-    st.warning("Data jam tidak tersedia untuk filter saat ini.")
-
-# Footnote
-st.caption("Proyek Analisis Data - Bike Sharing Dataset")
+    fig, ax = plt.subplots(figsize=(6, 4))
+    sns.barplot(data=time_avg, x='time_of_day', y='cnt', palette='Oranges', ax=ax)
+    ax.set_xlabel("Waktu Hari")
+    ax.set_ylabel("Rata-rata Penyewaan / Jam")
+    st.pyplot(fig)
